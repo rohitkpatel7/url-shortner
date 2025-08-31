@@ -9,7 +9,8 @@ function App() {
 
     try {
       // 👇 Backend API endpoint ko apne backend ka URL se replace karo
-      const res = await fetch("http://localhost:5000/api/shorten", {
+      const res = await fetch("https://url-shortner-backend.onrender.com/api/shorten", {
+
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ longUrl: url }),
