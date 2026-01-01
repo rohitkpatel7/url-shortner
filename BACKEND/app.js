@@ -17,13 +17,13 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // =========================
-// CREATE SHORT URL
+// ROUTES
 // =========================
 app.use("/api/create", shortUrlRouter);
 app.use("/api/analytics", analyticsRouter);
 
 // =========================
-// REDIRECT WITH REDIS + EXPIRY + KAFKA
+// REDIRECT WITH REDIS + EXPIRY + (OPTIONAL) KAFKA
 // =========================
 app.get("/:id", async (req, res) => {
   const { id } = req.params;
@@ -33,19 +33,23 @@ app.get("/:id", async (req, res) => {
     const cachedUrl = await redisClient.get(id);
 
     if (cachedUrl) {
-      // Kafka event (Redis hit)
-      await producer.send({
-        topic: "url_clicks",
-        messages: [
-          {
-            value: JSON.stringify({
-              shortId: id,
-              source: "redis",
-              timestamp: new Date().toISOString(),
-            }),
-          },
-        ],
-      });
+      // Kafka event (Redis hit) – non-blocking
+      try {
+        await producer.send({
+          topic: "url_clicks",
+          messages: [
+            {
+              value: JSON.stringify({
+                shortId: id,
+                source: "redis",
+                timestamp: new Date().toISOString(),
+              }),
+            },
+          ],
+        });
+      } catch {
+        // ignore Kafka failure
+      }
 
       return res.redirect(cachedUrl);
     }
@@ -57,7 +61,7 @@ app.get("/:id", async (req, res) => {
       return res.status(404).send("Not Found");
     }
 
-    // 🔥 EXPIRY CHECK
+    // 🔥 Expiry check
     if (url.expiresAt && url.expiresAt < new Date()) {
       return res.status(410).send("Link expired");
     }
@@ -76,19 +80,23 @@ app.get("/:id", async (req, res) => {
       await redisClient.set(id, url.full_url);
     }
 
-    // Kafka event (MongoDB hit)
-    await producer.send({
-      topic: "url_clicks",
-      messages: [
-        {
-          value: JSON.stringify({
-            shortId: id,
-            source: "mongodb",
-            timestamp: new Date().toISOString(),
-          }),
-        },
-      ],
-    });
+    // Kafka event (MongoDB hit) – non-blocking
+    try {
+      await producer.send({
+        topic: "url_clicks",
+        messages: [
+          {
+            value: JSON.stringify({
+              shortId: id,
+              source: "mongodb",
+              timestamp: new Date().toISOString(),
+            }),
+          },
+        ],
+      });
+    } catch {
+      // ignore Kafka failure
+    }
 
     res.redirect(url.full_url);
 
@@ -99,16 +107,21 @@ app.get("/:id", async (req, res) => {
 });
 
 // =========================
-// SERVER START
+// SERVER START (PRODUCTION SAFE)
 // =========================
 const PORT = process.env.PORT || 5500;
 
 app.listen(PORT, "0.0.0.0", async () => {
   await connectDB();
-  await producer.connect();
+
+  try {
+    await producer.connect();
+    console.log("Kafka producer connected");
+  } catch {
+    console.warn("Kafka not available, running without analytics");
+  }
 
   console.log("MongoDB connected");
   console.log("Redis connected");
-  console.log("Kafka producer connected");
   console.log(`Server running on port ${PORT}`);
 });

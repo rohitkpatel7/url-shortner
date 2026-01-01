@@ -1,9 +1,8 @@
 import { useState } from "react";
 import "./index.css";
 
-// ✅ Backend public URL (Codespaces-safe)
-const API_BASE =
-  "https://laughing-spark-pj7xvq9xr6w436jvq-5500.app.github.dev";
+const API_BASE = import.meta.env.VITE_API_BASE;
+
 
 export default function App() {
   const [url, setUrl] = useState("");
