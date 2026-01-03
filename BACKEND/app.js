@@ -23,14 +23,17 @@ app.use("/api/create", shortUrlRouter);
 app.use("/api/analytics", analyticsRouter);
 
 // =========================
-// REDIRECT WITH REDIS + EXPIRY + (OPTIONAL) KAFKA
+// REDIRECT WITH OPTIONAL REDIS + OPTIONAL KAFKA
 // =========================
 app.get("/:id", async (req, res) => {
   const { id } = req.params;
 
   try {
-    // 1️⃣ Redis check
-    const cachedUrl = await redisClient.get(id);
+    // 1️⃣ Redis cache check (OPTIONAL)
+    let cachedUrl = null;
+    if (redisClient) {
+      cachedUrl = await redisClient.get(id);
+    }
 
     if (cachedUrl) {
       // Kafka event (Redis hit) – non-blocking
@@ -48,7 +51,7 @@ app.get("/:id", async (req, res) => {
           ],
         });
       } catch {
-        // ignore Kafka failure
+        // ignore kafka failure
       }
 
       return res.redirect(cachedUrl);
@@ -61,23 +64,25 @@ app.get("/:id", async (req, res) => {
       return res.status(404).send("Not Found");
     }
 
-    // 🔥 Expiry check
+    // 3️⃣ Expiry check
     if (url.expiresAt && url.expiresAt < new Date()) {
       return res.status(410).send("Link expired");
     }
 
-    // 3️⃣ Save to Redis with TTL
-    let ttlInSeconds = null;
+    // 4️⃣ Save to Redis (OPTIONAL)
+    if (redisClient) {
+      let ttlInSeconds = null;
 
-    if (url.expiresAt) {
-      const diffMs = url.expiresAt.getTime() - Date.now();
-      ttlInSeconds = Math.floor(diffMs / 1000);
-    }
+      if (url.expiresAt) {
+        const diffMs = url.expiresAt.getTime() - Date.now();
+        ttlInSeconds = Math.floor(diffMs / 1000);
+      }
 
-    if (ttlInSeconds && ttlInSeconds > 0) {
-      await redisClient.set(id, url.full_url, { EX: ttlInSeconds });
-    } else {
-      await redisClient.set(id, url.full_url);
+      if (ttlInSeconds && ttlInSeconds > 0) {
+        await redisClient.set(id, url.full_url, { EX: ttlInSeconds });
+      } else {
+        await redisClient.set(id, url.full_url);
+      }
     }
 
     // Kafka event (MongoDB hit) – non-blocking
@@ -95,14 +100,14 @@ app.get("/:id", async (req, res) => {
         ],
       });
     } catch {
-      // ignore Kafka failure
+      // ignore kafka failure
     }
 
-    res.redirect(url.full_url);
+    return res.redirect(url.full_url);
 
   } catch (error) {
     console.error("Redirect error:", error);
-    res.status(500).send("Server Error");
+    return res.status(500).send("Server Error");
   }
 });
 
@@ -122,6 +127,6 @@ app.listen(PORT, "0.0.0.0", async () => {
   }
 
   console.log("MongoDB connected");
-  console.log("Redis connected");
+  console.log("Redis optional");
   console.log(`Server running on port ${PORT}`);
 });
