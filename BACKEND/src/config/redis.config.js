@@ -1,14 +1,23 @@
-import { createClient } from "redis";
+import Redis from "ioredis";
 
-const redisClient = createClient({
-  url: process.env.REDIS_URL
-});
+let redisClient = null;
 
-redisClient.on("error", (err) => {
-  console.error("Redis Error:", err);
-});
+if (process.env.REDIS_URL) {
+  try {
+    redisClient = new Redis(process.env.REDIS_URL);
 
-await redisClient.connect();
-console.log("Redis connected");
+    redisClient.on("connect", () => {
+      console.log("Redis connected");
+    });
+
+    redisClient.on("error", (err) => {
+      console.log("Redis Error:", err.message);
+    });
+  } catch (err) {
+    console.log("Redis disabled");
+  }
+} else {
+  console.log("Redis URL not provided, skipping Redis");
+}
 
 export default redisClient;
